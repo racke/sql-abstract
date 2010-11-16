@@ -5,6 +5,8 @@ use DBIx::Class::Storage::Debug::PrettyPrint;
 my $pp = DBIx::Class::Storage::Debug::PrettyPrint->new({
    profile => 'console',
    show_progress => 1,
+   format => '[%p][%c][%03L][%25F]»»»%n*** %m',
+   multiline_format => '    %m',
 });
 
 $pp->txn_begin;

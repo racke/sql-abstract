@@ -6,6 +6,8 @@ use warnings;
 use base 'DBIx::Class::Storage::Statistics';
 
 use SQL::Abstract::Tree;
+use Log::Structured;
+use Log::Sprintf;
 
 __PACKAGE__->mk_group_accessors( simple => '_sqlat' );
 __PACKAGE__->mk_group_accessors( simple => '_clear_line_str' );
@@ -13,6 +15,22 @@ __PACKAGE__->mk_group_accessors( simple => '_executing_str' );
 __PACKAGE__->mk_group_accessors( simple => '_show_progress' );
 __PACKAGE__->mk_group_accessors( simple => '_last_sql' );
 __PACKAGE__->mk_group_accessors( simple => 'squash_repeats' );
+__PACKAGE__->mk_group_accessors( simple => '_structured_logger' );
+
+my %code_to_method = (
+  C => 'log_package',
+  c => 'log_category',
+  d => 'log_date',
+  F => 'log_file',
+  H => 'log_host',
+  L => 'log_line',
+  l => 'log_location',
+  M => 'log_subroutine',
+  P => 'log_pid',
+  p => 'log_priority',
+  r => 'log_milliseconds_since_start',
+  R => 'log_milliseconds_since_last_log',
+);
 
 sub new {
    my $class = shift;
@@ -34,6 +52,53 @@ sub new {
    $self->_executing_str($executing);
    $self->_show_progress($show_progress);
 
+   if ($args->{format}) {
+
+      my $log_sprintf = Log::Sprintf->new({ format => $args->{format} });
+
+      my $per_line_log_sprintf = Log::Sprintf->new({
+         format => $args->{multiline_format}
+      });
+
+      my %formats = %{{
+         map { $_->{conversion} => 1 }
+         grep { ref $_ }
+         map @{$log_sprintf->_formatter->format_hunker->($log_sprintf, $_)},
+            grep $_,
+            $log_sprintf->{format},
+            $per_line_log_sprintf->{format}
+      }};
+
+      $self->_structured_logger(
+         Log::Structured->new({
+            category     => 'DBIC',
+            priority     => 'TRACE',
+            caller_depth => 2,
+            log_event_listeners => [sub {
+               my %struc = %{$_[1]};
+               my (@msg, undef) = split /\n/, delete $struc{message};
+               if ($args->{multiline_format}) {
+                  $self->debugfh->print($log_sprintf->sprintf({
+                     %struc,
+                     message => shift @msg,
+                  }) . "\n");
+                  $self->debugfh->print($per_line_log_sprintf->sprintf({
+                     %struc,
+                     message => $_,
+                  }) . "\n") for @msg;
+               } else {
+                  $self->debugfh->print($log_sprintf->sprintf({
+                     %struc,
+                     message => $_,
+                  }) . "\n") for @msg;
+               }
+            }],
+            map { $code_to_method{$_} => 1 }
+            grep { exists $code_to_method{$_} }
+            keys %formats
+         })
+      );
+   }
    $self->squash_repeats($squash_repeats);
 
    $self->_sqlat($sqlat);
@@ -50,8 +115,8 @@ sub print {
   my ($lw, $lr);
   ($lw, $string, $lr) = $string =~ /^(\s*)(.+?)(\s*)$/s;
 
-  local $self->_sqlat->{fill_in_placeholders} = 0 if defined $bindargs
-    && defined $bindargs->[0] && $bindargs->[0] eq q('__BULK_INSERT__');
+  local $self->_sqlat->{fill_in_placeholders} = 0 if defined $bindargs->[0]
+    && $bindargs->[0] eq q('__BULK_INSERT__');
 
   my $use_placeholders = !!$self->_sqlat->fill_in_placeholders;
 
@@ -67,7 +132,13 @@ sub print {
         unless $use_placeholders;
   }
 
-  $self->next::method("$lw$formatted$lr", @_);
+  if ($self->_structured_logger) {
+     $self->_structured_logger->log_event({
+        message => "$lw$formatted$lr",
+     })
+  } else {
+     $self->next::method("$lw$formatted$lr", @_)
+  }
 }
 
 sub query_start {
@@ -126,6 +197,13 @@ Where dbic.json contains:
 
    squash_repeats => 1,             # set to true to make repeated SQL queries
                                     # be ellided and only show the new bind params
+
+   format => '[%d][%c]%n ** %m',    # both format and multiline format take the
+   multiline_format => '   %m',     # formats defined in Log::Sprintf.  If only
+                                    # format is defined it will be used for each
+                                    # line of the log; if both are defined, format
+                                    # will be used for the first line, and
+                                    # multiline_format will be used for the rest
    # any other args are passed through directly to SQL::Abstract::Tree
  });
 

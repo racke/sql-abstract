@@ -1,6 +1,7 @@
 Revision history for SQL::Abstract
 
     - Remove excess parentheses in debug SQL
+    - Add more info to DBIx::Class::Storage::Debug::PrettyPrint
     - Fix parsing of foo.* in SQLA::Tree
     - Fix bindtype fail when using -between with arrayrefref literals
     - Add handling for NULL for -in

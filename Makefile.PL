@@ -18,6 +18,8 @@ requires 'Scalar::Util' => 0;
 requires 'Class::Accessor::Grouped' => 0.10002;
 requires 'Getopt::Long::Descriptive' => 0.086;
 requires 'Hash::Merge' => 0.12;
+requires 'Log::Structured' => 0.001001;
+requires 'Log::Sprintf' => 0.001001;
 
 test_requires "Test::More"      => 0.92;
 test_requires "Test::Deep"      => 0.106;
